@@ -1,0 +1,130 @@
+npalmass@npalmass-desk1:~/work/ollama/llama.cpp$ ./run_targeted.sh
+==PROF== Connected to process 3694099 (/home/npalmass/work/ollama/llama.cpp/build/bin/llama-server)
+0.00.293.963 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.425.498 W srv  llama_server: -----------------
+0.00.425.500 W srv  llama_server: CORS is set to allow all origins ('*') and no API key is set
+0.00.425.500 W srv  llama_server: this can be a security risk (cross-origin attacks)
+0.00.425.501 W srv  llama_server: more info: https://github.com/ggml-org/llama.cpp/pull/25655
+0.00.425.501 W srv  llama_server: -----------------
+0.00.426.696 I srv    load_model: loading model '/home/npalmass/work/inf_opt/models/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf'
+0.00.761.223 W load: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+0.02.020.868 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 4096, kv_unified = 'true'
+0.02.025.519 I srv  llama_server: model loaded
+0.02.025.536 I srv  llama_server: listening on http://127.0.0.1:8093
+0.29.869.355 I slot get_availabl: id  3 | task -1 | selected slot by LRU, t_last = -1
+0.29.869.385 I slot launch_slot_: id  3 | task 0 | processing task, is_child = 0
+==PROF== Profiling "mul_mat_vec_q": 0%....50%....100% - 7 passes
+==PROF== Profiling "mul_mat_vec_q": 0%....50%....100% - 7 passes
+==PROF== Profiling "mul_mat_vec_q": 0%....50%....100% - 7 passes
+==PROF== Profiling "mul_mat_vec_q": 0%....50%....100% - 7 passes
+==PROF== Profiling "mul_mat_vec_q": 0%....50%....100% - 7 passes
+==PROF== Profiling "mul_mat_vec_q": 0%....50%....100% - 7 passes
+==PROF== Profiling "mul_mat_vec_q": 0%....50%....100% - 7 passes
+==PROF== Profiling "mul_mat_vec_q": 0%....50%....100% - 7 passes
+==PROF== Profiling "mul_mat_vec_q": 0%....50%....100% - 7 passes
+==PROF== Profiling "mul_mat_vec_q": 0%....50%....100% - 7 passes
+0.35.136.022 I slot print_timing: id  3 | task 0 | n_decoded =    100, tg =  19.27 t/s, tg_3s =  19.27 t/s
+0.38.141.524 I slot print_timing: id  3 | task 0 | n_decoded =    233, tg =  28.43 t/s, tg_3s =  44.25 t/s
+0.39.566.622 I slot print_timing: id  3 | task 0 | prompt eval time =      76.29 ms /    25 tokens (    3.05 ms per token,   327.70 tokens per second)
+0.39.566.625 I slot print_timing: id  3 | task 0 |        eval time =    9620.92 ms /   300 tokens (   32.07 ms per token,    31.18 tokens per second)
+0.39.566.625 I slot print_timing: id  3 | task 0 |       total time =    9697.21 ms /   325 tokens
+0.39.566.630 I slot print_timing: id  3 | task 0 |    graphs reused =        298
+0.39.566.654 I slot      release: id  3 | task 0 | stop processing: n_tokens = 324, truncated = 0
+{
+    "index": 0,
+    "content": " The function should be efficient in terms of both time and space. Here is the function signature:\n\n```python\nfrom typing import List, Tuple\n\ndef find_pair_with_sum(nums: List[int], target: int) -> Tuple[int, int]:\n    \"\"\"\n    Finds two distinct indices in the list such that the elements at those indices sum to the target.\n    If no such indices exist, returns (-1, -1).\n\n    :param nums: List of integers.\n    :param target: Target sum.\n    :return: A tuple of two integers representing the indices of the elements that add up to the target, or (-1, -1) if no such pair exists.\n    \"\"\"\n    # Your implementation goes here\n```\n\n### Additional Information:\n- You may assume that each input would have exactly one solution.\n- The same element cannot be used twice.\n\n### Example:\n```python\n>>> find_pair_with_sum([3, 5, -4, 8, 11, 1, -1, 6], 10)\n(2, 7)\n```\n\n### Explanation:\nThe numbers at indices 2 and 7 are -1 and 6, which sum to 10.\n\n### Time Complexity Analysis:\nThe time complexity of the function should be O(n) where n is the length of the list. This is because the function iterates through the list at most once, using a dictionary to store and look up elements in constant time on",
+    "tokens": [],
+    "id_slot": 3,
+    "stop": true,
+    "model": "/home/npalmass/work/inf_opt/models/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
+    "tokens_predicted": 300,
+    "tokens_evaluated": 25,
+    "generation_settings": {
+        "seed": 4294967295,
+        "temperature": 0.800000011920929,
+        "dynatemp_range": 0.0,
+        "dynatemp_exponent": 1.0,
+        "top_k": 40,
+        "top_p": 0.949999988079071,
+        "min_p": 0.05000000074505806,
+        "top_n_sigma": -1.0,
+        "xtc_probability": 0.0,
+        "xtc_threshold": 0.10000000149011612,
+        "typical_p": 1.0,
+        "repeat_last_n": 64,
+        "repeat_penalty": 1.0,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0,
+        "dry_multiplier": 0.0,
+        "dry_base": 1.75,
+        "dry_allowed_length": 2,
+        "dry_penalty_last_n": 64,
+        "dry_sequence_breakers": [
+            "\n",
+            ":",
+            "\"",
+            "*"
+        ],
+        "mirostat": 0,
+        "mirostat_tau": 5.0,
+        "mirostat_eta": 0.10000000149011612,
+        "adaptive_target": -1.0,
+        "adaptive_decay": 0.8999999761581421,
+        "stop": [],
+        "max_tokens": 300,
+        "n_predict": 300,
+        "n_keep": 0,
+        "n_discard": 0,
+        "ignore_eos": false,
+        "stream": false,
+        "logit_bias": [],
+        "n_probs": 0,
+        "min_keep": 0,
+        "grammar": "",
+        "grammar_lazy": false,
+        "grammar_triggers": [],
+        "preserved_tokens": [],
+        "chat_format": "Content-only",
+        "reasoning_format": "deepseek",
+        "reasoning_in_content": false,
+        "generation_prompt": "",
+        "samplers": [
+            "penalties",
+            "dry",
+            "top_n_sigma",
+            "top_k",
+            "typ_p",
+            "top_p",
+            "min_p",
+            "xtc",
+            "temperature"
+        ],
+        "speculative.types": "none",
+        "timings_per_token": false,
+        "post_sampling_probs": false,
+        "backend_sampling": false,
+        "lora": []
+    },
+    "prompt": "Write a Python function that finds two numbers in a list that sum to a target, then explain the time complexity in detail.",
+    "has_new_line": true,
+    "truncated": false,
+    "stop_type": "limit",
+    "stopping_word": "",
+    "tokens_cached": 324,
+    "timings": {
+        "cache_n": 0,
+        "prompt_n": 25,
+        "prompt_ms": 76.289,
+        "prompt_per_token_ms": 3.0515600000000003,
+        "prompt_per_second": 327.7012413323022,
+        "predicted_n": 300,
+        "predicted_ms": 9620.917,
+        "predicted_per_token_ms": 32.06972333333333,
+        "predicted_per_second": 31.182058841168676
+    }
+}
+==PROF== Trying to shutdown target application
+==ERROR== The application returned an error code (9).
+==PROF== Report: /home/npalmass/work/ollama/llama.cpp/baseline_bandwidth_ncu4.ncu-rep
+-rw-r--r-- 1 root root 3952321 Aug  8 10:02 baseline_bandwidth_ncu4.ncu-rep
+npalmass@npalmass-desk1:~/work/ollama/llama.cpp$
