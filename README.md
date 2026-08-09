@@ -30,8 +30,8 @@ Output:
 > NAME                   ID              SIZE      PROCESSOR    CONTEXT    UNTIL
 > qwen2.5:7b-instruct    845dbda0ea48    4.7 GB    100% GPU     4096       4 minutes from now
 
-This confirms the model fits 100% on GPU. Also verified from log entries:  
-`Aug 07 21:41:01 npalmass-desk1 ollama[1452130]: slot print_timing: id 0 | task 60 | eval time = 193.17 ms / 23 tokens ( 8.40 ms per token, 119.07 tokens per second)`  
+This confirms the model fits 100% on GPU. Also verified from log entries:
+`Aug 07 21:41:01 npalmass-desk1 ollama[1452130]: slot print_timing: id 0 | task 60 | eval time = 193.17 ms / 23 tokens ( 8.40 ms per token, 119.07 tokens per second)`
 
 if there was a CPU offload, tok/sec would be much slower, around 20 tok/sec. The model
 pulled by ollama was only used for this check, the following benchmarks were done with
@@ -66,8 +66,8 @@ First launch the server with explicit full GPU residency and 4096 context size:
 
 then check and confirm:
 ```bash
-npalmass@npalmass-desk1:~/work/inf_opt/models$ nvidia-smi 
-Fri Aug  7 22:51:39 2026       
+npalmass@npalmass-desk1:~/work/inf_opt/models$ nvidia-smi
+Fri Aug  7 22:51:39 2026
 +-----------------------------------------------------------------------------------------+
 | NVIDIA-SMI 580.126.09             Driver Version: 580.126.09     CUDA Version: 13.0     |
 +-----------------------------------------+------------------------+----------------------+
@@ -314,6 +314,30 @@ This is exactly the trap the assignment's Phase 3 warns about: a per-kernel prox
 metric got better while the real end-to-end metric got worse. Sector efficiency alone
 wasn't enough evidence.
 
+**Closed the loop: did the L1-level "waste" ever cost real DRAM traffic?** Ran one more
+`ncu` pass, `dram__bytes.sum` and `dram__throughput.avg.pct_of_peak_sustained_elapsed`,
+same 4 instances, both builds:
+
+| Metric (sum/avg, 4 instances) | Baseline | int2 + shuffle | Delta |
+|---|---|---|---|
+| `dram__bytes.sum` | 93.65 MB | 93.69 MB | **+0.048%** (noise) |
+| `dram__throughput.avg.pct_of_peak_sustained_elapsed` | 66.70% | 59.45% | **-7.25pp** |
+
+Total bytes moved from DRAM are identical between the two builds. The 32.87%→36.47%
+sector-efficiency gain was real at the L1 request level but never turned into fewer
+bytes crossing HBM — L1 was already absorbing that "waste" before the fix, so there was
+never a DRAM-level saving to capture. The DRAM-throughput% drop is just the mechanical
+consequence of the same finding from the instruction-count check: same bytes, but the
+shuffle kernel takes longer to move them (the +13.45% extra instructions), so the
+average %-of-peak achieved over that longer window is lower.
+
+Full chain, cause to effect: L1 sector efficiency improves -> DRAM bytes moved:
+unchanged -> instructions executed: +13.45% -> DRAM throughput%: -7.25% (same bytes,
+longer kernel) -> decode tok/s: -2.84%. The fix solved a problem that didn't exist at
+the level that actually costs cycles, and the attempt to solve it cost cycles of its
+own. This is the fact-checked version of "the fix isn't free" above, not just an
+instruction-count inference.
+
 **Why I'm not porting this to `u[]`:** checked first whether the same trick is even
 safe there. It isn't, cleanly. `block_q4_K` is 144 bytes — a multiple of 16 — so `qs`
 lands on a clean 32-byte boundary for every block, which is what made the `int2` tiling
@@ -332,3 +356,5 @@ as a patch/diff alongside this write-up, not as live code.
 Artifacts: `run_regression_diagnosis_baseline.sh`, `int2_shuffle_attempt.patch`,
 `run_regression_diagnosis_shuffle.sh`, `baseline_regression_diagnosis.csv`,
 `shuffle_regression_diagnosis.csv`, `.ncu-rep` files for both.
+`run_dram_diagnosis.sh`, `baseline_dram_diagnosis.csv`/`.ncu-rep`,
+`shuffle_dram_diagnosis.csv`/`.ncu-rep`.
