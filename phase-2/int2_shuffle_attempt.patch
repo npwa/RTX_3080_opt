@@ -1,0 +1,31 @@
+diff --git a/ggml/src/ggml-cuda/vecdotq.cuh b/ggml/src/ggml-cuda/vecdotq.cuh
+index 0f039c735..db89f99b3 100644
+--- a/ggml/src/ggml-cuda/vecdotq.cuh
++++ b/ggml/src/ggml-cuda/vecdotq.cuh
+@@ -924,9 +924,23 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
+     // iqs = 8...11 -> bq8_offset = 4, want q4_offset = 64, 68, 72, 76
+     // iqs = 12..15 -> bq8_offset = 6, want q4_offset = 96, 100, 104, 108
+ 
+-    const int * q4 = (const int *)(bq4_K->qs + 16 * bq8_offset + 4 * ((iqs/2)%4));
+-    v[0] = q4[0];
+-    v[1] = q4[4];
++    const int lane_in_group = (iqs/2) % 4;
++    const int q4_group_byte_offset = 16 * bq8_offset;
++
++    // v[0] and v[1] for the whole group span exactly one 32-byte sector. Tile
++    // it 8 bytes per lane (one int2 load covers the full sector across the
++    // group in a single transaction), then redistribute to the owning lane
++    // via shuffle instead of two separate half-sector loads.
++    const int2 chunk = *(const int2 *)(bq4_K->qs + q4_group_byte_offset + 8 * lane_in_group);
++    const unsigned int mask = __activemask();
++
++    const int v0_from_x = __shfl_sync(mask, chunk.x, lane_in_group / 2,     4);
++    const int v0_from_y = __shfl_sync(mask, chunk.y, lane_in_group / 2,     4);
++    const int v1_from_x = __shfl_sync(mask, chunk.x, lane_in_group / 2 + 2, 4);
++    const int v1_from_y = __shfl_sync(mask, chunk.y, lane_in_group / 2 + 2, 4);
++
++    v[0] = (lane_in_group % 2 == 0) ? v0_from_x : v0_from_y;
++    v[1] = (lane_in_group % 2 == 0) ? v1_from_x : v1_from_y;
+ 
+     const uint16_t * scales = (const uint16_t *)bq4_K->scales;
+     uint16_t aux[2];
