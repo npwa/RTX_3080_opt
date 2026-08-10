@@ -1,0 +1,8 @@
+rep 0: aggregate=267.53 tok/s  wall=1.914s  total_tokens=512  per-request_tok/s=[67.73, 67.72, 67.73, 67.72]
+rep 1: aggregate=266.56 tok/s  wall=1.921s  total_tokens=512  per-request_tok/s=[67.52, 67.52, 67.69, 67.69]
+rep 2: aggregate=268.17 tok/s  wall=1.909s  total_tokens=512  per-request_tok/s=[68.10, 67.92, 67.92, 68.10]
+rep 3: aggregate=268.37 tok/s  wall=1.908s  total_tokens=512  per-request_tok/s=[67.79, 67.79, 67.79, 67.78]
+rep 4: aggregate=267.61 tok/s  wall=1.913s  total_tokens=512  per-request_tok/s=[67.79, 67.87, 67.87, 67.88]
+
+samples: [267.53493341412803, 266.5635468129494, 268.1663175795193, 268.3735623471837, 267.6074117661426]
+median aggregate tok/s: 267.61

@@ -1,0 +1,14 @@
+ The function should return the indices of the two numbers. If no such pair exists, return `None`. Additionally, provide a brief explanation of the time complexity of your solution.
+
+### Example
+```python
+def find_two_sum(numbers, target):
+    """
+    Finds two numbers in the list 'numbers' that sum to 'target'.
+    Returns a tuple of their indices, or None if no such pair exists.
+    """
+    # Your code here
+
+# Example usage
+print(find_two_sum([2, 7, 11, 15], 9))  # Output: (0, 1)
+print(find

@@ -515,7 +515,7 @@ Artifacts: `run_graphopt_ncu.sh`, `graphopt_off_ncu.csv`/`.ncu-rep`,
 ----
 
 
-## Next Steps (Not Yet Started)
+## Next Steps (in progress)
 
 All three investigations here converge on the same root cause: this kernel is
 memory-bound, and nothing tried moves less data — it just moves the same data
@@ -526,12 +526,13 @@ amortize against on its own.
 
 Not all runs have been completed.
 
-- **Core batching test.** Status: **PENDING.** Launch `llama-server` with multiple parallel slots (`-np 4`,
-  context sized up accordingly), fire several completion requests concurrently instead
-  of sequentially, and compare aggregate decode tok/s against `N ×` the single-stream
-  baseline.  Profile with `ncu` on `dram__bytes.sum` per request as batch size grows —
-  the real test of the amortization hypothesis is whether per-request DRAM traffic
-  drops, not just whether aggregate throughput looks better.
+- **Core batching test.** Status: **PENDING.** Launch `llama-server` with multiple
+  parallel slots (`-np 4`, context sized up accordingly), fire several completion
+  requests concurrently instead of sequentially, and compare aggregate decode tok/s
+  against `N ×` the single-stream baseline.  Profile with `ncu` on `dram__bytes.sum`
+  per request as batch size grows — the real test of the amortization hypothesis is
+  whether per-request DRAM traffic drops, not just whether aggregate throughput looks
+  better.
 
 - **Re-test `GGML_CUDA_GRAPH_OPT=1` under real concurrency.** Status: **DONE** (see
   `phase-3/next-steps-graphopt-concurrency.md`).  Result: the batch-1 regression
@@ -539,11 +540,19 @@ Not all runs have been completed.
   out to be an idle-GPU-specific artifact, not a fixed per-request cost. Doesn't change
   the standing recommendation (continuous batching remains the real untested lever).
 
-- **Prerequisite check before extending the int2+shuffle fix to batched decode.**
-  Status: **PENDING.** The fix only touched `mul_mat_vec_q<12,1,1,0>`, the batch-1
-  kernel template.  Phase 0's own top-3 list includes a separate `<12,2,0,0>` variant —
-  almost certainly the batch-2 path.  Before assuming the fix is even relevant under
-  batching, capture one `nsys` trace at `-np 4` and check which kernel template
-  actually dominates.  If decode shifts to a different kernel as concurrency rises, the
-  int2+shuffle question doesn't apply as-is and would need re-deriving against
-  whichever kernel is actually running.
+- **Prerequisite check: does batched decode even dispatch through the kernel the
+  int2+shuffle patch touches?** **DONE**, then extended. See
+  `phase-2/next-steps-int2shuffle-concurrency.md`. Kernel dominance shifts entirely under
+  real concurrency: the original batch-1 target kernel drops out of the top 20 GPU-time
+  consumers, replaced by `<12,2,...>`/`<12,4,...>` variants (41.9% of GPU time combined,
+  more than the batch-1 kernel's original 26.4% share). The patch still applies to
+  those kernels, since dispatch is by quant type, not batch size, so it was re-tested
+  there directly. Correctness holds under real concurrent server load; all 4 slots are
+  byte-identical pre/post patch, not just unit-level coverage. Throughput reverses
+  direction from batch-1's clean -2.84% regression to a small **+0.80%** improvement, but
+  with a thin sample-range overlap. This is a weaker, less certain signal than the
+  batch-1 result, not a confirmed win.  DRAM bytes moved are still unchanged pre/post,
+  the same L1-absorption pattern as batch-1, so the small improvement isn't explained
+  by reduced memory traffic; its actual cause is unconfirmed. The patch remains
+  reverted. This is new evidence about the conditions under which it might matter, not
+  a status change to the shipped code.
