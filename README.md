@@ -206,7 +206,7 @@ Artifacts: `run_mem_efficiency_check.sh`, `mem_efficiency_check.ncu-rep`,
 
 ----
 
-## Phase 2: the int2 + shuffle attempt (and why I reverted it)
+## Phase 2: The int2 + shuffle attempt (and why I reverted it)
 
 **Target:** the `v[0]`/`v[1]` weight load in `vec_dot_q4_K_q8_1`
 (`vecdotq.cuh`), the load step of `mul_mat_vec_q<12,...>` — my Phase 1
@@ -358,3 +358,82 @@ Artifacts: `run_regression_diagnosis_baseline.sh`, `int2_shuffle_attempt.patch`,
 `shuffle_regression_diagnosis.csv`, `.ncu-rep` files for both.
 `run_dram_diagnosis.sh`, `baseline_dram_diagnosis.csv`/`.ncu-rep`,
 `shuffle_dram_diagnosis.csv`/`.ncu-rep`.
+
+----
+
+## Phase 3: Closing the gaps from the fusion investigation
+
+**Hypothesis, stated before running anything:** `GGML_CUDA_GRAPH_OPT=1` only changes
+stream assignment/dispatch order for the Q/K/V matmuls — it doesn't touch
+`mul_mat_vec_q`'s own kernel code at all.  So I expected per-kernel `dram__bytes.sum` to
+come back essentially unchanged between flag-off and flag-on, same pattern as the
+int2+shuffle DRAM-bytes check.  If `dram__throughput%` or `gpu__time_duration` shifted
+instead, that would point to real DRAM-bandwidth contention from the concurrent Q/K/V
+dispatch as the actual mechanism behind the `llama-bench` regression (-2.98% tg128,
+-5.93% pp512).  If they didn't shift, the regression is more likely host-side
+stream/event overhead than a memory-subsystem effect.
+
+Same targeted `ncu` script I've been using all along, run twice — once with
+`GGML_CUDA_GRAPH_OPT=0`, once with `=1`, both against the unmodified baseline kernel at
+commit `3653e6d6d` (tag: `b10326`).
+
+```bash
+GGML_CUDA_GRAPH_OPT=<0|1> sudo -E ncu \
+  --metrics dram__bytes.sum,dram__throughput.avg.pct_of_peak_sustained_elapsed,sm__throughput.avg.pct_of_peak_sustained_elapsed,gpu__time_duration.sum \
+  --kernel-name regex:mul_mat_vec_q --launch-skip 500 --launch-count 5 \
+  -o <graphopt_off_ncu|graphopt_on_ncu> --force-overwrite \
+  ./build/bin/llama-server -m /home/npalmass/work/inf_opt/models/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf \
+  --port 8093 --host 127.0.0.1 -ngl 99 -c 4096
+```
+
+Same completion request, same 4 `mul_mat_vec_q<12,...>` decode-phase instances as every
+other measurement in this project.
+
+**Results:**
+
+| Metric (sum/avg over 4 instances) | `GRAPH_OPT=0` | `GRAPH_OPT=1` | Delta |
+|---|---|---|---|
+| `dram__bytes.sum` | 97.12 MB | 97.14 MB | +0.020% |
+| `dram__throughput.avg.pct_of_peak_sustained_elapsed` | 61.47% | 62.40% | +0.92pp |
+| `sm__throughput.avg.pct_of_peak_sustained_elapsed` | 43.91% | 44.63% | +0.72pp |
+| `gpu__time_duration.sum` | 159.36 us | 158.62 us | -0.462% |
+
+Every instance tracks its counterpart almost exactly: the largest single instance came
+in at 78.2492 MB / 90.93% / 116.45us off vs. 78.2566 MB / 90.72% / 116.70us on.  All
+four deltas sit inside measurement noise.  None of them show the -2.98%/-5.93%
+regression `llama-bench` measured end-to-end.
+
+**What this confirms, and what it can't:** the first half of the hypothesis holds
+directly — `mul_mat_vec_q`'s own behavior (bytes moved, achieved DRAM/SM throughput,
+wall-clock duration) doesn't change with the flag.  That rules out the kernel itself
+doing more work or running slower in isolation.
+
+What it *can't* confirm is the other half: DRAM-bandwidth contention between
+concurrently-dispatched Q/K/V streams.  `ncu`'s `--launch-skip`/`--launch-count`
+profiling isolates and replays individual kernel instances for clean counter collection,
+which by construction tends to serialize around the profiled kernel — exactly the kind
+of real cross-stream overlap this experiment was trying to catch.  So a clean result
+here doesn't mean contention isn't happening in a real, un-profiled run: it means this
+specific method has a blind spot for it.
+
+Combined with the flat per-kernel numbers, the tighter conclusion is: the regression
+isn't explained by anything visible at the single-kernel level.  That rules out "the
+kernel got slower or moved more data," and narrows it to two remaining candidates I
+didn't confirm further here: host-side stream/event orchestration overhead, or
+interaction with CUDA graph capture/replay (the server logs show graphs active — `graphs
+reused = N` — and adding extra streams inside a graph-captured region is a plausible
+source of replay overhead this measurement doesn't see).  Telling those two apart would
+need `nsys` timeline inspection instead of `ncu` counters.  I'm not chasing that — per
+the fusion investigation's own conclusion, the recommendation to redirect toward
+continuous batching instead of this lever stands.
+
+**Gaps closed from the last review:**
+1. Per-kernel `ncu` before/after — done above.  Result: flat, not the mechanism.
+2. Numeric hypothesis stated before running — done above, and reported as partially
+   confirmed (DRAM/duration side) and partially inconclusive by methodology (contention
+   side), rather than overclaimed either way.
+
+**No code changes** — repo stays at clean `HEAD`.
+
+Artifacts: `run_graphopt_ncu.sh`, `graphopt_off_ncu.csv`/`.ncu-rep`,
+`graphopt_on_ncu.csv`/`.ncu-rep`.
