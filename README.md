@@ -524,27 +524,26 @@ same idea, is **continuous batching**: amortizing a single weight fetch across m
 concurrent requests instead of optimizing a batch-1 decode path that has nothing to
 amortize against on its own.
 
-I haven't run any of this yet.
+Not all runs have been completed.
 
-- **Core batching test.** Launch `llama-server` with multiple parallel slots (`-np 4`,
+- **Core batching test.** Status: **PENDING.** Launch `llama-server` with multiple parallel slots (`-np 4`,
   context sized up accordingly), fire several completion requests concurrently instead
   of sequentially, and compare aggregate decode tok/s against `N ×` the single-stream
   baseline.  Profile with `ncu` on `dram__bytes.sum` per request as batch size grows —
   the real test of the amortization hypothesis is whether per-request DRAM traffic
   drops, not just whether aggregate throughput looks better.
 
-- **Re-test `GGML_CUDA_GRAPH_OPT=1` under real concurrency.** Its batch-1 regression
-  was explained by "no bandwidth to share, streams just add overhead against a
-  bottleneck with nothing to parallelize" — a reason specific to batch-1.  Under real
-  concurrent load there's more independent work in flight, so whether that overhead
-  becomes cheaper (amortized) or worse (more streams competing) is genuinely unknown.
-  Same batching setup as above, flag on vs. off, aggregate throughput both ways.
+- **Re-test `GGML_CUDA_GRAPH_OPT=1` under real concurrency.** Status: **DONE** (see
+  `phase-3/next-steps-graphopt-concurrency.md`).  Result: the batch-1 regression
+  doesn't persist under concurrent load (flag-off/on now overlap, within noise) — turns
+  out to be an idle-GPU-specific artifact, not a fixed per-request cost. Doesn't change
+  the standing recommendation (continuous batching remains the real untested lever).
 
-- **Prerequisite check before extending the int2+shuffle fix to batched decode.** The
-  fix only touched `mul_mat_vec_q<12,1,1,0>`, the batch-1 kernel template.  Phase 0's
-  own top-3 list includes a separate `<12,2,0,0>` variant — almost certainly the
-  batch-2 path.  Before assuming the fix is even relevant under batching, capture one
-  `nsys` trace at `-np 4` and check which kernel template actually dominates.  If
-  decode shifts to a different kernel as concurrency rises, the int2+shuffle question
-  doesn't apply as-is and would need re-deriving against whichever kernel is actually
-  running.
+- **Prerequisite check before extending the int2+shuffle fix to batched decode.**
+  Status: **PENDING.** The fix only touched `mul_mat_vec_q<12,1,1,0>`, the batch-1
+  kernel template.  Phase 0's own top-3 list includes a separate `<12,2,0,0>` variant —
+  almost certainly the batch-2 path.  Before assuming the fix is even relevant under
+  batching, capture one `nsys` trace at `-np 4` and check which kernel template
+  actually dominates.  If decode shifts to a different kernel as concurrency rises, the
+  int2+shuffle question doesn't apply as-is and would need re-deriving against
+  whichever kernel is actually running.
