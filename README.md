@@ -1,5 +1,39 @@
 # Take-Home Follow-Up: CUDA Kernel Optimization (RTX 3080)
 
+## Results Dashboard
+
+**Target:** `mul_mat_vec_q<12,1,1,0>` (Q4_K decode matvec), 26.4% of decode GPU
+time. **Confirmed memory-bound**: 72.1% of peak DRAM bandwidth vs. 45.7% of peak
+compute (Phase 0). **Net result: no kept end-to-end improvement** — three independent,
+correctness-verified attempts, all honestly reported.
+
+### Baseline (Phase 0)
+
+| Metric | Value |
+|---|---|
+| Prefill (pp512, median of 5) | 5229.88 tok/s |
+| Decode (tg128, median of 5) | 134.05 tok/s |
+| #1 kernel achieved DRAM bandwidth | 532.4 GB/s (72.1% of 760 GB/s peak) |
+| #1 kernel SM (compute) utilization | 45.7% of peak |
+| #1 kernel sector efficiency (bytes used / fetched) | 34.0% average |
+
+### Optimization attempts
+
+| # | Attempt | Correctness | Kernel-level result | End-to-end result | Outcome |
+|---|---|---|---|---|---|
+| 1 | int4 broadcast load | passed | sector eff. unchanged (32.87%) | not benchmarked — no kernel-level effect, stopped here | **no effect** |
+| 2 | int2 load + `__shfl_sync` | ✅ `test-backend-ops` 13,054/13,054, fixed-seed byte-identical | sector eff. 32.87%→36.47%, sectors loaded -12.4%, DRAM bytes **unchanged** (93.65→93.69 MB) — waste absorbed by L1, never reached HBM | decode **-2.84%**, prefill -0.44% | **reverted** — real regression, root-caused to +13.45% instruction overhead |
+| 3 | `GGML_CUDA_GRAPH_OPT=1` (Q/K/V stream concurrency, upstream flag) | n/a — existing toggle, no code change | kernel itself unaffected (DRAM bytes +0.020%, noise) | decode **-2.98%**, prefill **-5.93%** | **not adopted** — regression is host-side/graph overhead, not kernel-level |
+
+### Conclusion
+
+All three attempts converge on the same cause: this kernel is memory-bound and already
+near a local optimum for its load pattern and available fusions on this GPU/model. Most
+promising untested direction: **continuous batching**, to amortize weight reads across
+concurrent requests — the actual lever a batch-1 decode kernel has nothing to exploit
+on its own.
+
+
 ## Phase 0: Baseline & Profile
 
 1. Confirm that llama.cpp build environment on my desktop is in a clean, ready
@@ -10,6 +44,8 @@ cd ~/work/ollama/llama.cpp
 git pull
 git tag --points-at HEAD
 # Tag is "b10326", Commit: 3653e6d6d
+git log -1 --oneline
+# 3653e6d6d (HEAD -> master, tag: b10326, origin/master, origin/HEAD) tts: account for the vocoder pass in the timings line (#26733)
 
 cmake -B build -DGGML_CUDA=ON
 cmake --build build --config Release -j
@@ -197,6 +233,30 @@ in the same coalesced transaction instead of scattered 32-byte-apart bursts. Thi
 wasted bytes fetched per launch, without changing the arithmetic. Fewer wasted bytes
 moved per useful token should show up directly as higher decode tok/s.
 
+**Revised expected ceiling, from the confirmed mechanism (supersedes the ~30% estimate
+above, which was based on per-instance variance before the real cause was traced):**
+`v[]` and `u[]` reads are the same size (8 bytes/ iteration) and share the identical
+scattered-load structure confirmed in source (`u[2*i+0]=q8[0]; u[2*i+1]=q8[4]` — same
+16-byte-apart pattern as `v[]`); `sc`/`m` reads are comparatively tiny. So `v[]`
+accounts for roughly half the kernel's load-instruction byte traffic.
+
+`v[0]`+`v[1]` together span exactly one 32-byte sector, so a fully coalesced version of
+*just this load* has a theoretical ceiling of 100% sector efficiency for that
+portion. Blended with `u[]` and `sc`/`m` unchanged, that implies a kernel-wide sector
+efficiency ceiling of roughly 34% + 0.5×(100% − 34%) ≈ **67%**, not full efficiency,
+since only half the traffic is being targeted.
+
+For a memory-bound kernel, execution time scales roughly with total bytes fetched
+(useful + wasted). Halving the waste on ~50% of traffic implies roughly a 25–33%
+reduction in total bytes fetched by this kernel — an optimistic first-order estimate of
+**kernel-level speedup**, before considering the kernel is already at 72.1% of peak
+bandwidth (Phase 0), which likely caps real headroom below this naive estimate.
+
+Scaled to end-to-end: this kernel is 26.4% of total decode GPU time (Phase 0). Even the
+optimistic ~25–33% kernel-level ceiling above translates to roughly **0.264 × 30% ≈ 7%
+end-to-end decode speedup as an upper bound** — a modest number even before the fix is
+attempted, which is worth keeping in mind against Phase 2's actual result.
+
 **Correctness gate before this counts as done:** `test-backend-ops` must pass, and
 generation output must match baseline byte-for-byte at a fixed seed. A faster kernel that
 changes output doesn't count.
@@ -338,6 +398,20 @@ the level that actually costs cycles, and the attempt to solve it cost cycles of
 own. This is the fact-checked version of "the fix isn't free" above, not just an
 instruction-count inference.
 
+**Summary of all Phase 2 measurements, baseline vs. kept attempt (int2 + shuffle):**
+
+| Metric (avg over 4 instances) | Baseline | int2 + shuffle | Delta |
+|---|---|---|---|
+| Sector efficiency | 32.87% | 36.47% | +3.6pp |
+| Sectors loaded | 4,675,580 | 4,095,178 | -12.4% |
+| Bank conflicts | 178,481.5 | 177,511.8 | noise |
+| Instructions executed | 8,548,736 | 9,698,688 | +13.45% |
+| Warps active (% of peak) | 62.09% | 63.79% | +1.70pp (noise) |
+| DRAM bytes moved | 93.65 MB | 93.69 MB | +0.048% (noise) |
+| DRAM throughput (% of peak) | 66.70% | 59.45% | -7.25pp |
+| **End-to-end decode (llama-bench)** | **134.05 tok/s** | **130.24 tok/s** | **-2.84%** |
+| **End-to-end prefill (llama-bench)** | **5229.88 tok/s** | **5206.80 tok/s** | **-0.44%** |
+
 **Why I'm not porting this to `u[]`:** checked first whether the same trick is even
 safe there. It isn't, cleanly. `block_q4_K` is 144 bytes — a multiple of 16 — so `qs`
 lands on a clean 32-byte boundary for every block, which is what made the `int2` tiling
@@ -437,3 +511,40 @@ continuous batching instead of this lever stands.
 
 Artifacts: `run_graphopt_ncu.sh`, `graphopt_off_ncu.csv`/`.ncu-rep`,
 `graphopt_on_ncu.csv`/`.ncu-rep`.
+
+----
+
+
+## Next Steps (Not Yet Started)
+
+All three investigations here converge on the same root cause: this kernel is
+memory-bound, and nothing tried moves less data — it just moves the same data
+differently.  The one lever that's structurally different, not another variant of the
+same idea, is **continuous batching**: amortizing a single weight fetch across multiple
+concurrent requests instead of optimizing a batch-1 decode path that has nothing to
+amortize against on its own.
+
+I haven't run any of this yet.
+
+- **Core batching test.** Launch `llama-server` with multiple parallel slots (`-np 4`,
+  context sized up accordingly), fire several completion requests concurrently instead
+  of sequentially, and compare aggregate decode tok/s against `N ×` the single-stream
+  baseline.  Profile with `ncu` on `dram__bytes.sum` per request as batch size grows —
+  the real test of the amortization hypothesis is whether per-request DRAM traffic
+  drops, not just whether aggregate throughput looks better.
+
+- **Re-test `GGML_CUDA_GRAPH_OPT=1` under real concurrency.** Its batch-1 regression
+  was explained by "no bandwidth to share, streams just add overhead against a
+  bottleneck with nothing to parallelize" — a reason specific to batch-1.  Under real
+  concurrent load there's more independent work in flight, so whether that overhead
+  becomes cheaper (amortized) or worse (more streams competing) is genuinely unknown.
+  Same batching setup as above, flag on vs. off, aggregate throughput both ways.
+
+- **Prerequisite check before extending the int2+shuffle fix to batched decode.** The
+  fix only touched `mul_mat_vec_q<12,1,1,0>`, the batch-1 kernel template.  Phase 0's
+  own top-3 list includes a separate `<12,2,0,0>` variant — almost certainly the
+  batch-2 path.  Before assuming the fix is even relevant under batching, capture one
+  `nsys` trace at `-np 4` and check which kernel template actually dominates.  If
+  decode shifts to a different kernel as concurrency rises, the int2+shuffle question
+  doesn't apply as-is and would need re-deriving against whichever kernel is actually
+  running.
